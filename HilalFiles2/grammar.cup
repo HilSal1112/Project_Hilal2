@@ -1,0 +1,283 @@
+import java_cup.runtime.*;
+import java.util.*;
+
+parser code {: :};
+action code {: :};
+
+/* -------- Terminals (from tokens.jflex / spec) -------- */
+terminal CLASS, AND, ELSE, IF, WHILE, READ, PRINT, PRINTLINE, RETURN;
+terminal OR, MULT, PLUS, MINUS, DIV, SEMI, LPAREN, RPAREN;
+terminal LBRACKET, RBRACKET, LBRACE, RBRACE, INC, DEC;
+terminal LT, GT, LE, GE, EQEQ, NE, NOT, QMARK, COLON, EQ, COMMA;
+terminal VOID, INT, FLOAT, BOOL, CHAR, TRUE, FALSE, FINAL;
+terminal ERROR;
+
+terminal String ID;
+terminal String INTLIT;
+terminal String FLOATLIT;
+terminal String CHARLIT;
+terminal String STRLIT;
+
+/* -------- Nonterminals and value types -------- */
+non terminal Program program;
+non terminal StmtList stmts;
+non terminal Stmt stmt;
+non terminal Stmt block;
+non terminal Stmt if_end;
+non terminal Expr expr;
+non terminal Expr name;
+non terminal String type_name;
+non terminal java.util.ArrayList expr_list;
+non terminal java.util.ArrayList name_list;
+non terminal java.util.ArrayList printline_args;
+
+/* -------- Operator precedence -------- */
+precedence right QMARK, COLON;
+precedence left OR;
+precedence left AND;
+precedence left EQEQ, NE;
+precedence left LT, LE, GT, GE;
+precedence left PLUS, MINUS;
+precedence left MULT, DIV;
+precedence right NOT;
+
+/* -------- Start symbol -------- */
+start with program;
+
+/* =====================================================
+ * Program and Statement Lists
+ * ===================================================== */
+
+program ::=
+    stmts:s
+    {: RESULT = new Program(s); :}
+    ;
+
+stmts ::=
+    stmt:s stmts:ss
+    {: ss.prepend(s); RESULT = ss; :}
+  | /* empty */
+    {: RESULT = new StmtList(); :}
+    ;
+
+/* =====================================================
+ * Blocks and IfEnd
+ * ===================================================== */
+
+/* { Stmts } */
+block ::=
+    LBRACE stmts:s RBRACE
+    {: RESULT = new BlockStmt(s); :}
+    ;
+
+/* IfEnd → else { Stmts } | λ */
+if_end ::=
+    ELSE block:b
+    {: RESULT = b; :}
+  | /* empty */
+    {: RESULT = null; :}
+    ;
+
+/* =====================================================
+ * Statements (Phase 1)
+ * ===================================================== */
+
+stmt ::=
+    /* if ( Expr ) { Stmts } IfEnd */
+    IF LPAREN expr:e RPAREN block:tb if_end:eb
+    {: RESULT = new IfStmt(e, tb, eb); :}
+
+  /* while ( Expr ) { Stmts } */
+  | WHILE LPAREN expr:e RPAREN block:b
+    {: RESULT = new WhileStmt(e, b); :}
+
+  /* Name = Expr ; */
+  | name:n EQ expr:e SEMI
+    {: RESULT = new AssignStmt(n.toString(0), e); :}
+
+  /* read ( Readlist ) ; */
+  | READ LPAREN name_list:nl RPAREN SEMI
+    {: RESULT = new ReadStmt(nl); :}
+
+  /* print ( Printlist ) ; */
+  | PRINT LPAREN expr_list:el RPAREN SEMI
+    {: RESULT = new PrintStmt(el); :}
+
+  /* printline ( Printlinelist ) ; */
+  | PRINTLINE LPAREN printline_args:pl RPAREN SEMI
+    {: RESULT = new PrintLineStmt(pl); :}
+
+  /* id ( ) ; */
+  | ID:f LPAREN RPAREN SEMI
+    {: java.util.ArrayList a = new java.util.ArrayList(); RESULT = new CallStmt(f, a); :}
+
+  /* id ( Args ) ; */
+  | ID:f LPAREN expr_list:el RPAREN SEMI
+    {: RESULT = new CallStmt(f, el); :}
+
+  /* return ; */
+  | RETURN SEMI
+    {: RESULT = new ReturnStmt(null); :}
+
+  /* return Expr ; */
+  | RETURN expr:e SEMI
+    {: RESULT = new ReturnStmt(e); :}
+
+  /* Name ++ ; */
+  | name:n INC SEMI
+    {: RESULT = new IncStmt(n); :}
+
+  /* Name -- ; */
+  | name:n DEC SEMI
+    {: RESULT = new DecStmt(n); :}
+
+  /* { Stmts } Optionalsemi */
+  | block:b
+    {: RESULT = b; :}
+  | block:b SEMI
+    {: RESULT = b; :}
+    ;
+
+/* =====================================================
+ * Name and List Rules
+ * ===================================================== */
+
+/* Name → id | id [ Expr ] */
+name ::=
+    ID:id
+    {: RESULT = new VarExpr(id); :}
+  | ID:id LBRACKET expr:e RBRACKET
+    {: RESULT = new ArrayAccessExpr(id, e); :}
+    ;
+
+/* Readlist → Name , Readlist | Name */
+name_list ::=
+    name:n
+    {:
+       java.util.ArrayList list = new java.util.ArrayList();
+       list.add(n);
+       RESULT = list;
+     :}
+  | name:n COMMA name_list:nl
+    {:
+       nl.add(0, n);
+       RESULT = nl;
+     :}
+    ;
+
+/* Exprlist → Expr , Exprlist | Expr */
+expr_list ::=
+    expr:e
+    {:
+       java.util.ArrayList list = new java.util.ArrayList();
+       list.add(e);
+       RESULT = list;
+     :}
+  | expr:e COMMA expr_list:el
+    {:
+       el.add(0, e);
+       RESULT = el;
+     :}
+    ;
+
+/* Printlinelist → Printlist | λ */
+printline_args ::=
+    /* empty (printline()) */
+    {:
+       java.util.ArrayList list = new java.util.ArrayList();
+       RESULT = list;
+     :}
+  | expr_list:el
+    {: RESULT = el; :}
+    ;
+
+/* =====================================================
+ * Expressions (Phase 1)
+ * ===================================================== */
+
+expr ::=
+    /* Name as expression */
+      name:n
+        {: RESULT = n; :}
+
+    /* Literals */
+    | INTLIT:n
+        {: RESULT = new IntLiteral(n); :}
+    | FLOATLIT:f
+        {: RESULT = new FloatLiteral(f); :}
+    | CHARLIT:c
+        {: RESULT = new CharLiteral(c); :}
+    | STRLIT:s
+        {: RESULT = new StringLiteral(s); :}
+    | TRUE
+        {: RESULT = new BoolLiteral("true"); :}
+    | FALSE
+        {: RESULT = new BoolLiteral("false"); :}
+
+    /* Function calls as expressions: id() / id(args) */
+    | ID:f LPAREN RPAREN
+        {:
+            java.util.ArrayList a = new java.util.ArrayList();
+            RESULT = new CallExpr(f, a);
+         :}
+    | ID:f LPAREN expr_list:el RPAREN
+        {: RESULT = new CallExpr(f, el); :}
+
+    /* Parentheses */
+    | LPAREN expr:e RPAREN
+        {: RESULT = e; :}
+
+    /* Unary ops: -x, +x, ~x */
+    | MINUS expr:e
+        {: RESULT = new UnaryExpr("-", e); :}
+    | PLUS expr:e
+        {: RESULT = new UnaryExpr("+", e); :}
+    | NOT expr:e
+        {: RESULT = new UnaryExpr("~", e); :}
+
+    /* Binary arithmetic / relational / logical ops */
+    | expr:e1 MULT expr:e2
+        {: RESULT = new BinaryExpr(e1, "*",  e2); :}
+    | expr:e1 DIV expr:e2
+        {: RESULT = new BinaryExpr(e1, "/",  e2); :}
+    | expr:e1 PLUS expr:e2
+        {: RESULT = new BinaryExpr(e1, "+",  e2); :}
+    | expr:e1 MINUS expr:e2
+        {: RESULT = new BinaryExpr(e1, "-",  e2); :}
+    | expr:e1 LT expr:e2
+        {: RESULT = new BinaryExpr(e1, "<",  e2); :}
+    | expr:e1 LE expr:e2
+        {: RESULT = new BinaryExpr(e1, "<=", e2); :}
+    | expr:e1 GT expr:e2
+        {: RESULT = new BinaryExpr(e1, ">",  e2); :}
+    | expr:e1 GE expr:e2
+        {: RESULT = new BinaryExpr(e1, ">=", e2); :}
+    | expr:e1 EQEQ expr:e2
+        {: RESULT = new BinaryExpr(e1, "==", e2); :}
+    | expr:e1 NE expr:e2
+        {: RESULT = new BinaryExpr(e1, "<>", e2); :}
+    | expr:e1 AND expr:e2
+        {: RESULT = new BinaryExpr(e1, "&&", e2); :}
+    | expr:e1 OR expr:e2
+        {: RESULT = new BinaryExpr(e1, "||", e2); :}
+
+    /* Cast: (Type) Expr */
+    | LPAREN type_name:t RPAREN expr:e
+        {: RESULT = new CastExpr(t, e); :}
+
+    /* Ternary: (cond ? then : else) */
+    | LPAREN expr:c QMARK expr:t COLON expr:e2 RPAREN
+        {: RESULT = new TernaryExpr(c, t, e2); :}
+    ;
+
+/* =====================================================
+ * Type Names (for casts)
+ * ===================================================== */
+
+type_name ::=
+    INT   {: RESULT = "int"; :}
+  | FLOAT {: RESULT = "float"; :}
+  | BOOL  {: RESULT = "bool"; :}
+  | CHAR  {: RESULT = "char"; :}
+    ;
+
